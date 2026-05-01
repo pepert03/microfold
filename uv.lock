@@ -258,15 +258,6 @@ nvtx = [
 ]
 
 [[package]]
-name = "einops"
-version = "0.8.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz", hash = "sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827", size = 56261, upload-time = "2026-01-26T04:13:17.638Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl", hash = "sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193", size = 65638, upload-time = "2026-01-26T04:13:18.546Z" },
-]
-
-[[package]]
 name = "filelock"
 version = "3.25.2"
 source = { registry = "https://pypi.org/simple" }
@@ -490,13 +481,13 @@ wheels = [
 [[package]]
 name = "microfold"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "biotite" },
-    { name = "mp-nerf" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "py3dmol" },
+    { name = "requests" },
     { name = "torch" },
     { name = "transformers" },
 ]
@@ -509,30 +500,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "biotite", specifier = ">=1.6.0" },
-    { name = "mp-nerf", specifier = ">=1.0.3" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "pandas", specifier = ">=3.0.2" },
     { name = "py3dmol", specifier = ">=2.5.4" },
+    { name = "requests", specifier = ">=2.32.0" },
     { name = "torch", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cu126" },
     { name = "transformers", specifier = ">=5.7.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.3" }]
-
-[[package]]
-name = "mp-nerf"
-version = "1.0.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "einops" },
-    { name = "numpy" },
-    { name = "torch" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/9e/4bb3531530465ba1730bfcd2bb8582d724c855487ddac6cbf03404d39a63/mp-nerf-1.0.3.tar.gz", hash = "sha256:e6b8275ba22b4fbd242f1dff49ec628cd826d53da683858a83c3fb9f059695d1", size = 22850, upload-time = "2021-07-22T23:10:16.799Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0a/6b/ff5f381897ec1adacf42c84d4703d9e7484770a5d3692122b1924808b7de/mp_nerf-1.0.3-py3-none-any.whl", hash = "sha256:c8bb149cbdd3f8dc40763839d184e06f38147ecd734a7c9bc1b8169fa0baf95e", size = 23426, upload-time = "2021-07-22T23:10:15.182Z" },
-]
 
 [[package]]
 name = "mpmath"
