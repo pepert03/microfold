@@ -233,6 +233,7 @@ def train(
         history: list[dict[str, Any]] = []
         best_metric = float("inf")
         best_epoch = 0
+        best_row: dict[str, Any] | None = None
         no_improve = 0  # consecutive val checks with no improvement
         stopped_early = False
 
@@ -315,6 +316,7 @@ def train(
                 if agg["mean_rmsd"] < best_metric - early_stop_min_delta:
                     best_metric = agg["mean_rmsd"]
                     best_epoch = epoch
+                    best_row = dict(row)
                     no_improve = 0
                     improved = True
                 else:
@@ -340,6 +342,8 @@ def train(
                     cur = row["train_rmsd"]
                     if cur < best_metric:
                         best_metric = cur
+                        best_epoch = epoch
+                        best_row = dict(row)
                         improved = True
 
             ckpt = {
@@ -361,11 +365,25 @@ def train(
 
         print(f"done. best metric = {best_metric:.3f}{' (early-stopped)' if stopped_early else ''}")
         print(f"run dir: {run_dir}")
+
+        report = {
+            "run_id": run_id,
+            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "best_epoch": int(best_epoch),
+            "best_metric": float(best_metric) if best_metric != float("inf") else None,
+            "best_metric_name": "train_rmsd" if overfit else "val_rmsd_mean",
+            "best": best_row,
+            "epochs_run": history[-1]["epoch"] if history else 0,
+            "stopped_early": stopped_early,
+        }
+        (run_dir / "report.json").write_text(json.dumps(report, indent=2, default=str))
+
         return {
             "best_rmsd": float(best_metric),
             "best_epoch": int(best_epoch),
             "run_dir": run_dir,
             "stopped_early": stopped_early,
+            "report": report,
         }
     finally:
         sys.stdout = tee._stream  # type: ignore[assignment]
