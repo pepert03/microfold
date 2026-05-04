@@ -15,7 +15,7 @@ import torch
 from torch import nn
 from transformers import AutoModel, AutoTokenizer
 
-ESM_NAME = "facebook/esm2_t6_8M_UR50D"
+ESM_NAME = "facebook/esm2_t12_35M_UR50D"  # esm2_t6_8M_UR50D is the smallest ESM-2 model, with 6 layers and 8M parameters. It produces 320-d per-residue embeddings.
 MAX_LEN = 30
 
 
@@ -37,12 +37,12 @@ class ESMEmbedder(nn.Module):
         """Return s[B, max_len, c_s]. Real-residue rows are filled, padding rows are zeros."""
         device = next(self.model.parameters()).device
         tok = self.tokenizer(sequences, return_tensors="pt", padding=True).to(device)
-        out = self.model(**tok).last_hidden_state         # [B, T, c_s]
+        out = self.model(**tok).last_hidden_state  # [B, T, c_s]
         b = len(sequences)
         s = out.new_zeros(b, self.max_len, self.c_s)
         for i, seq in enumerate(sequences):
             n = min(len(seq), self.max_len)
-            s[i, :n] = out[i, 1 : 1 + n]                  # strip <cls>
+            s[i, :n] = out[i, 1 : 1 + n]  # strip <cls>
         return s
 
 
@@ -53,9 +53,15 @@ def _axis_angle_to_matrix(aa: torch.Tensor) -> torch.Tensor:
     x, y, z = axis.unbind(-1)
     K = torch.stack(
         [
-            torch.zeros_like(x), -z,  y,
-            z,  torch.zeros_like(x), -x,
-            -y,  x,  torch.zeros_like(x),
+            torch.zeros_like(x),
+            -z,
+            y,
+            z,
+            torch.zeros_like(x),
+            -x,
+            -y,
+            x,
+            torch.zeros_like(x),
         ],
         dim=-1,
     ).reshape(*aa.shape[:-1], 3, 3)
@@ -75,6 +81,7 @@ class IPABlock(nn.Module):
         n_heads: int = 4,
         n_qpoints: int = 4,
         n_vpoints: int = 8,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.c_s = c_s
@@ -94,19 +101,23 @@ class IPABlock(nn.Module):
         self.gamma = nn.Parameter(torch.zeros(n_heads))
 
         self.lin_out = nn.Linear(n_heads * (c_hidden + n_vpoints * 3 + n_vpoints), c_s)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.norm = nn.LayerNorm(c_s)
 
         # Update head: 3 axis-angle + 3 local translation per residue
         self.update = nn.Sequential(
-            nn.Linear(c_s, c_s), nn.ReLU(), nn.Linear(c_s, 6)
+            nn.Linear(c_s, c_s),
+            nn.ReLU(),
+            nn.Dropout(dropout) if dropout > 0 else nn.Identity(),
+            nn.Linear(c_s, 6),
         )
 
     def forward(
         self,
-        s: torch.Tensor,           # [B, N, c_s]
-        R: torch.Tensor,           # [B, N, 3, 3]
-        t: torch.Tensor,           # [B, N, 3]
-        mask: torch.Tensor,        # [B, N]
+        s: torch.Tensor,  # [B, N, c_s]
+        R: torch.Tensor,  # [B, N, 3, 3]
+        t: torch.Tensor,  # [B, N, 3]
+        mask: torch.Tensor,  # [B, N]
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, N, _ = s.shape
         H, C, Pq, Pv = self.h, self.c_h, self.pq, self.pv
@@ -124,7 +135,7 @@ class IPABlock(nn.Module):
         def to_global(pts_loc: torch.Tensor) -> torch.Tensor:
             return torch.einsum("bnij,bnhpj->bnhpi", R, pts_loc) + t.view(B, N, 1, 1, 3)
 
-        qp = to_global(qp_loc)     # [B, N, H, Pq, 3]
+        qp = to_global(qp_loc)  # [B, N, H, Pq, 3]
         kp = to_global(kp_loc)
         vp = to_global(vp_loc)
 
@@ -134,8 +145,8 @@ class IPABlock(nn.Module):
 
         # Point attention: -gamma * w * sum_p ||qp_i - kp_j||^2
         # qp[B,N(q),H,P,3] - kp[B,N(k),H,P,3]
-        diff = qp.unsqueeze(2) - kp.unsqueeze(1)            # [B, Nq, Nk, H, P, 3]
-        sq_dist = diff.pow(2).sum(dim=(-1, -2))             # [B, Nq, Nk, H]
+        diff = qp.unsqueeze(2) - kp.unsqueeze(1)  # [B, Nq, Nk, H, P, 3]
+        sq_dist = diff.pow(2).sum(dim=(-1, -2))  # [B, Nq, Nk, H]
         sq_dist = sq_dist.permute(0, 3, 1, 2).contiguous()  # [B, H, Nq, Nk]
         gamma = nn.functional.softplus(self.gamma).view(1, H, 1, 1)
         w_point = math.sqrt(2.0 / (9 * Pq))
@@ -144,22 +155,24 @@ class IPABlock(nn.Module):
         logits = scalar_logits + point_logits
 
         # Mask key positions where mask_j == 0
-        key_mask = mask.view(B, 1, 1, N)                    # broadcast over h, query
+        key_mask = mask.view(B, 1, 1, N)  # broadcast over h, query
         logits = logits.masked_fill(key_mask < 0.5, -1e9)
 
-        attn = torch.softmax(logits, dim=-1)                # [B, H, Nq, Nk]
+        attn = torch.softmax(logits, dim=-1)  # [B, H, Nq, Nk]
         # Zero out queries that are padding (so their output is harmless)
         q_mask = mask.view(B, 1, N, 1)
         attn = attn * q_mask
 
         # Aggregate scalar values
-        o_scalar = torch.einsum("bhnm,bmhc->bnhc", attn, v)        # [B, N, H, C]
+        o_scalar = torch.einsum("bhnm,bmhc->bnhc", attn, v)  # [B, N, H, C]
 
         # Aggregate point values then transform back to local
         o_vp_global = torch.einsum("bhnm,bmhpi->bnhpi", attn, vp)  # [B, N, H, Pv, 3]
         o_vp_centered = o_vp_global - t.view(B, N, 1, 1, 3)
-        o_vp_local = torch.einsum("bnji,bnhpj->bnhpi", R, o_vp_centered)  # R^T applied -> use R[..,j,i]
-        o_vp_norm = o_vp_local.norm(dim=-1)                # [B, N, H, Pv]
+        o_vp_local = torch.einsum(
+            "bnji,bnhpj->bnhpi", R, o_vp_centered
+        )  # R^T applied -> use R[..,j,i]
+        o_vp_norm = o_vp_local.norm(dim=-1)  # [B, N, H, Pv]
 
         out = torch.cat(
             [
@@ -169,9 +182,9 @@ class IPABlock(nn.Module):
             ],
             dim=-1,
         )
-        s_new = self.norm(s + self.lin_out(out))
+        s_new = self.norm(s + self.dropout(self.lin_out(out)))
 
-        upd = self.update(s_new)                           # [B, N, 6]
+        upd = self.update(s_new)  # [B, N, 6]
         d_axis_angle = upd[..., :3]
         d_t_local = upd[..., 3:]
         return s_new, d_axis_angle, d_t_local
@@ -184,14 +197,35 @@ class BackboneModel(nn.Module):
         self,
         n_layers: int = 8,
         c_s: int | None = None,
+        c_hidden: int = 16,
+        n_heads: int = 4,
+        n_qpoints: int = 4,
+        n_vpoints: int = 8,
+        dropout: float = 0.0,
         max_len: int = MAX_LEN,
         esm_name: str = ESM_NAME,
     ) -> None:
         super().__init__()
         self.embedder = ESMEmbedder(esm_name, max_len=max_len)
         cs = c_s if c_s is not None else self.embedder.c_s
-        self.proj = nn.Linear(self.embedder.c_s, cs) if cs != self.embedder.c_s else nn.Identity()
-        self.layers = nn.ModuleList([IPABlock(cs) for _ in range(n_layers)])
+        self.proj = (
+            nn.Linear(self.embedder.c_s, cs)
+            if cs != self.embedder.c_s
+            else nn.Identity()
+        )
+        self.layers = nn.ModuleList(
+            [
+                IPABlock(
+                    cs,
+                    c_hidden=c_hidden,
+                    n_heads=n_heads,
+                    n_qpoints=n_qpoints,
+                    n_vpoints=n_vpoints,
+                    dropout=dropout,
+                )
+                for _ in range(n_layers)
+            ]
+        )
         self.max_len = max_len
 
     def forward(
@@ -208,7 +242,7 @@ class BackboneModel(nn.Module):
               "t": final t [B, N, 3],
             }
         """
-        s = self.embedder(sequences)                       # [B, N, c_s_esm]
+        s = self.embedder(sequences)  # [B, N, c_s_esm]
         s = self.proj(s)
         B, N, _ = s.shape
         device = s.device
@@ -219,12 +253,16 @@ class BackboneModel(nn.Module):
         intermediates: list[tuple[torch.Tensor, torch.Tensor]] = []
         for layer in self.layers:
             s, d_aa, d_tl = layer(s, R, t, mask)
-            dR = _axis_angle_to_matrix(d_aa)               # [B, N, 3, 3]
+            dR = _axis_angle_to_matrix(d_aa)  # [B, N, 3, 3]
             R_new = R @ dR
             # local translation update: world delta = R @ d_tl
             t_new = t + torch.einsum("bnij,bnj->bni", R, d_tl)
             intermediates.append((R_new, t_new))
-            R = R_new.detach()                              # stop rotation grads between layers
+            R = R_new.detach()  # stop rotation grads between layers
             t = t_new
 
-        return {"intermediate": intermediates, "R": intermediates[-1][0], "t": intermediates[-1][1]}
+        return {
+            "intermediate": intermediates,
+            "R": intermediates[-1][0],
+            "t": intermediates[-1][1],
+        }
