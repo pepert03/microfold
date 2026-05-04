@@ -24,7 +24,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 import torch
@@ -149,9 +149,15 @@ def train(
     device: str | None = None,
     index_csv: Path = Path("data_cache/index_ok.csv"),
     out_root: Path = Path("outputs"),
-) -> None:
-    run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
-    run_dir = out_root / run_id
+    on_validation: Callable[[int, dict[str, Any]], None] | None = None,
+    run_dir_override: Path | None = None,
+) -> dict[str, Any]:
+    if run_dir_override is not None:
+        run_dir = Path(run_dir_override)
+        run_id = run_dir.name
+    else:
+        run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
+        run_dir = out_root / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     tee = _Tee(sys.stdout, run_dir / "train.log")
@@ -314,6 +320,19 @@ def train(
                 else:
                     no_improve += 1
                     print(f"   no improvement ({no_improve}/{early_stop_patience}); best {best_metric:.3f} @ epoch {best_epoch}")
+
+                if on_validation is not None:
+                    try:
+                        on_validation(epoch, agg)
+                    except Exception as e:
+                        # Pruning / external stop signal: persist a marker and re-raise.
+                        (run_dir / "pruned.json").write_text(json.dumps({
+                            "epoch": epoch,
+                            "best_rmsd": best_metric,
+                            "best_epoch": best_epoch,
+                            "reason": type(e).__name__,
+                        }, indent=2))
+                        raise
             else:
                 history.append(row)
                 _write_history_csv(history, run_dir / "history.csv")
@@ -342,6 +361,12 @@ def train(
 
         print(f"done. best metric = {best_metric:.3f}{' (early-stopped)' if stopped_early else ''}")
         print(f"run dir: {run_dir}")
+        return {
+            "best_rmsd": float(best_metric),
+            "best_epoch": int(best_epoch),
+            "run_dir": run_dir,
+            "stopped_early": stopped_early,
+        }
     finally:
         sys.stdout = tee._stream  # type: ignore[assignment]
         tee.close()

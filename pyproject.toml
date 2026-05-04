@@ -8,6 +8,7 @@ dependencies = [
     "biotite>=1.6.0",
     "matplotlib>=3.9.0",
     "numpy>=2.4.4",
+    "optuna>=4.0",
     "pandas>=3.0.2",
     "py3dmol>=2.5.4",
     "requests>=2.32.0",
