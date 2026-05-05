@@ -28,6 +28,8 @@ class SampleRecord:
     length: int
     intermediate: float
     final: float
+    bond: float
+    clash: float
     total: float
     rmsd: float
     html: str  # relative path to per-sample html
@@ -38,11 +40,15 @@ def _aggregate(records: list[SampleRecord]) -> dict[str, float | int]:
     totals = [r.total for r in records]
     finals = [r.final for r in records]
     inters = [r.intermediate for r in records]
+    bonds = [r.bond for r in records]
+    clashes = [r.clash for r in records]
     return {
         "n": len(records),
         "mean_total": float(statistics.fmean(totals)),
         "mean_intermediate": float(statistics.fmean(inters)),
         "mean_final": float(statistics.fmean(finals)),
+        "mean_bond": float(statistics.fmean(bonds)),
+        "mean_clash": float(statistics.fmean(clashes)),
         "mean_rmsd": float(statistics.fmean(rmsds)),
         "median_rmsd": float(statistics.median(rmsds)),
         "min_rmsd": float(min(rmsds)),
@@ -57,6 +63,11 @@ def run_val(
     device: torch.device,
     out_dir: Path,
     epoch: int,
+    w_bond: float = 0.1,
+    w_clash: float = 0.05,
+    bond_tol: float = 0.02,
+    clash_limit: float = 2.0,
+    use_clash: bool = False,
 ) -> dict[str, Any]:
     """Evaluate model on every sample; write per-sample html + macro html into out_dir."""
     out_dir = Path(out_dir)
@@ -75,7 +86,11 @@ def run_val(
         true_all = batch["true_all_backbone_coords"].to(device)
 
         out = model(seqs, mask)
-        losses = total_loss(out["intermediate"], out["R"], out["t"], true_R, true_t, true_all, mask)
+        losses = total_loss(
+            out["intermediate"], out["R"], out["t"], true_R, true_t, true_all, mask,
+            w_bond=w_bond, w_clash=w_clash, bond_tol=bond_tol,
+            clash_limit=clash_limit, use_clash=use_clash,
+        )
         pred_all = stamp_backbone(out["R"], out["t"]).cpu()
         truth_all = batch["true_all_backbone_coords"]
         m_cpu = batch["mask"]
@@ -101,6 +116,8 @@ def run_val(
                 length=n,
                 intermediate=float(losses["intermediate"].item()),
                 final=float(losses["final"].item()),
+                bond=float(losses["bond"].item()),
+                clash=float(losses["clash"].item()),
                 total=float(losses["total"].item()),
                 rmsd=float(rmsd),
                 html=html_rel,

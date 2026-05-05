@@ -24,15 +24,17 @@ from microfold.train import train
 def make_objective(study_dir: Path, epochs: int, val_every: int):
     def objective(trial: optuna.Trial) -> float:
         params: dict[str, Any] = {
-            "lr":           trial.suggest_float("lr", 1e-4, 3e-3, log=True),
+            "lr": trial.suggest_float("lr", 1e-4, 1e-2, log=True),
             "weight_decay": trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True),
-            "dropout":      trial.suggest_float("dropout", 0.0, 0.5),
-            "batch_size":   trial.suggest_categorical("batch_size", [16, 32, 64]),
-            "n_layers":     trial.suggest_int("n_layers", 4, 12),
-            "c_hidden":     trial.suggest_categorical("c_hidden", [8, 16, 32, 64]),
-            "n_heads":      trial.suggest_categorical("n_heads", [2, 4, 6, 8]),
-            "n_qpoints":    trial.suggest_categorical("n_qpoints", [2, 4, 8]),
-            "n_vpoints":    trial.suggest_categorical("n_vpoints", [4, 8, 12]),
+            "dropout": trial.suggest_float("dropout", 0.0, 0.5),
+            "batch_size": trial.suggest_categorical("batch_size", [8, 16, 32]),
+            "n_layers": trial.suggest_int("n_layers", 4, 8),
+            "c_hidden": trial.suggest_categorical("c_hidden", [8, 16, 32, 64]),
+            "n_heads": trial.suggest_categorical("n_heads", [1, 2, 4, 6, 8]),
+            "n_qpoints": trial.suggest_categorical("n_qpoints", [2, 4, 8]),
+            "n_vpoints": trial.suggest_categorical("n_vpoints", [4, 8, 12]),
+            "w_bond": trial.suggest_float("w_bond", 1e-3, 1.0, log=True),
+            "w_clash": trial.suggest_float("w_clash", 1e-3, 1.0, log=True),
         }
         run_dir = study_dir / f"trial_{trial.number:03d}"
 
@@ -48,6 +50,8 @@ def make_objective(study_dir: Path, epochs: int, val_every: int):
             on_validation=on_val,
             run_dir_override=run_dir,
             save_checkpoints=False,
+            use_clash_loss=True,
+            clash_warmup_epochs=epochs // 2,
             **params,
         )
         return result["best_rmsd"]
@@ -62,8 +66,9 @@ def main() -> None:
     ap.add_argument("--n-trials", type=int, required=True)
     ap.add_argument("--epochs", type=int, required=True)
     ap.add_argument("--val-every", type=int, default=3)
-    ap.add_argument("--timeout", type=int, default=None,
-                    help="overall wall-clock budget in seconds")
+    ap.add_argument(
+        "--timeout", type=int, default=None, help="overall wall-clock budget in seconds"
+    )
     a = ap.parse_args()
 
     study_dir = Path("outputs") / f"optuna_{a.study_name}"
@@ -91,10 +96,12 @@ def main() -> None:
     best = study.best_trial
     print(f"\nbest trial #{best.number}: rmsd {best.value:.3f}")
     print(json.dumps(best.params, indent=2))
-    (study_dir / "best_params.json").write_text(json.dumps(
-        {"value": best.value, "params": best.params, "trial": best.number},
-        indent=2,
-    ))
+    (study_dir / "best_params.json").write_text(
+        json.dumps(
+            {"value": best.value, "params": best.params, "trial": best.number},
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -44,10 +44,10 @@ SPLIT_SEED = 42
 
 HISTORY_COLS = [
     "epoch",
-    "train_total", "train_inter", "train_final", "train_rmsd",
-    "val_total", "val_inter", "val_final",
+    "train_total", "train_inter", "train_final", "train_bond", "train_clash", "train_rmsd",
+    "val_total", "val_inter", "val_final", "val_bond", "val_clash",
     "val_rmsd_mean", "val_rmsd_median", "val_rmsd_min", "val_rmsd_max",
-    "lr",
+    "lr", "clash_active",
 ]
 
 
@@ -146,6 +146,12 @@ def train(
     val_frac: float = 0.15,
     early_stop_patience: int = 6,
     early_stop_min_delta: float = 0.01,
+    use_clash_loss: bool = False,
+    w_bond: float = 0.1,
+    w_clash: float = 0.05,
+    bond_tol: float = 0.02,
+    clash_limit: float = 2.0,
+    clash_warmup_epochs: int = 50,
     device: str | None = None,
     index_csv: Path = Path("data_cache/index_ok.csv"),
     out_root: Path = Path("outputs"),
@@ -192,6 +198,12 @@ def train(
             "val_frac": val_frac,
             "early_stop_patience": early_stop_patience,
             "early_stop_min_delta": early_stop_min_delta,
+            "use_clash_loss": use_clash_loss,
+            "w_bond": w_bond,
+            "w_clash": w_clash,
+            "bond_tol": bond_tol,
+            "clash_limit": clash_limit,
+            "clash_warmup_epochs": clash_warmup_epochs,
             "split_seed": SPLIT_SEED,
             "index_csv": str(index_csv),
         }
@@ -240,9 +252,12 @@ def train(
 
         for epoch in range(1, epochs + 1):
             model.train()
+            clash_active = use_clash_loss and epoch > clash_warmup_epochs
             ep_total = 0.0
             ep_inter = 0.0
             ep_final = 0.0
+            ep_bond = 0.0
+            ep_clash = 0.0
             ep_rmsd_sum = 0.0
             ep_n = 0
 
@@ -256,7 +271,11 @@ def train(
                 true_all = batch["true_all_backbone_coords"].to(device_t)
 
                 out = model(seqs, mask)
-                losses = total_loss(out["intermediate"], out["R"], out["t"], true_R, true_t, true_all, mask)
+                losses = total_loss(
+                    out["intermediate"], out["R"], out["t"], true_R, true_t, true_all, mask,
+                    w_bond=w_bond, w_clash=w_clash, bond_tol=bond_tol,
+                    clash_limit=clash_limit, use_clash=clash_active,
+                )
                 opt.zero_grad()
                 losses["total"].backward()
                 torch.nn.utils.clip_grad_norm_(trainable, 1.0)
@@ -270,6 +289,8 @@ def train(
                 ep_total += losses["total"].item() * B
                 ep_inter += losses["intermediate"].item() * B
                 ep_final += losses["final"].item() * B
+                ep_bond += losses["bond"].item() * B
+                ep_clash += losses["clash"].item() * B
                 ep_rmsd_sum += sum(rmsds)
                 ep_n += B
 
@@ -278,26 +299,37 @@ def train(
                 "train_total": ep_total / ep_n,
                 "train_inter": ep_inter / ep_n,
                 "train_final": ep_final / ep_n,
+                "train_bond": ep_bond / ep_n,
+                "train_clash": ep_clash / ep_n,
                 "train_rmsd": ep_rmsd_sum / ep_n,
                 "lr": opt.param_groups[0]["lr"],
+                "clash_active": int(clash_active),
             }
 
             if epoch == 1 or epoch % log_every == 0 or epoch == epochs:
                 print(
                     f"epoch {epoch:4d}  train: total {row['train_total']:.4f}  "
                     f"inter {row['train_inter']:.4f}  final {row['train_final']:.4f}  "
+                    f"bond {row['train_bond']:.4f}  clash {row['train_clash']:.4f}"
+                    f"{' [on]' if clash_active else ' [off]'}  "
                     f"rmsd_mean {row['train_rmsd']:.3f}"
                 )
 
             improved = False
             if val_ds is not None and (epoch % val_every == 0 or epoch == epochs):
                 val_dir = run_dir / f"val_epoch_{epoch:03d}"
-                res = run_val(model, val_ds, device_t, val_dir, epoch)
+                res = run_val(
+                    model, val_ds, device_t, val_dir, epoch,
+                    w_bond=w_bond, w_clash=w_clash, bond_tol=bond_tol,
+                    clash_limit=clash_limit, use_clash=clash_active,
+                )
                 agg = res["aggregate"]
                 row.update({
                     "val_total": agg["mean_total"],
                     "val_inter": agg["mean_intermediate"],
                     "val_final": agg["mean_final"],
+                    "val_bond": agg["mean_bond"],
+                    "val_clash": agg["mean_clash"],
                     "val_rmsd_mean": agg["mean_rmsd"],
                     "val_rmsd_median": agg["median_rmsd"],
                     "val_rmsd_min": agg["min_rmsd"],
@@ -412,6 +444,12 @@ def main() -> None:
     ap.add_argument("--val-frac", type=float, default=0.15)
     ap.add_argument("--early-stop-patience", type=int, default=6, help="val checks w/o improvement before stop; 0 disables")
     ap.add_argument("--early-stop-min-delta", type=float, default=0.01, help="min RMSD (A) improvement to reset patience")
+    ap.add_argument("--use-clash-loss", action="store_true", help="enable steric clash penalty after warmup")
+    ap.add_argument("--w-bond", type=float, default=0.1, help="peptide bond loss weight")
+    ap.add_argument("--w-clash", type=float, default=0.05, help="steric clash loss weight")
+    ap.add_argument("--bond-tol", type=float, default=0.02, help="flat-bottom tolerance (A) around d_lit=1.328")
+    ap.add_argument("--clash-limit", type=float, default=2.0, help="non-bonded atom min distance (A)")
+    ap.add_argument("--clash-warmup-epochs", type=int, default=50, help="epochs before clash loss activates")
     ap.add_argument("--device", type=str, default=None)
     a = ap.parse_args()
     train(
@@ -433,6 +471,12 @@ def main() -> None:
         val_frac=a.val_frac,
         early_stop_patience=a.early_stop_patience,
         early_stop_min_delta=a.early_stop_min_delta,
+        use_clash_loss=a.use_clash_loss,
+        w_bond=a.w_bond,
+        w_clash=a.w_clash,
+        bond_tol=a.bond_tol,
+        clash_limit=a.clash_limit,
+        clash_warmup_epochs=a.clash_warmup_epochs,
         device=a.device,
     )
 
