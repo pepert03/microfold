@@ -44,8 +44,10 @@ def make_objective(study_dir: Path, epochs: int, val_every: int):
         result = train(
             epochs=epochs,
             val_every=val_every,
+            early_stop_patience=10,
             on_validation=on_val,
             run_dir_override=run_dir,
+            save_checkpoints=False,
             **params,
         )
         return result["best_rmsd"]
@@ -59,7 +61,7 @@ def main() -> None:
     ap.add_argument("--storage", default="sqlite:///optuna_study.db")
     ap.add_argument("--n-trials", type=int, required=True)
     ap.add_argument("--epochs", type=int, required=True)
-    ap.add_argument("--val-every", type=int, default=5)
+    ap.add_argument("--val-every", type=int, default=3)
     ap.add_argument("--timeout", type=int, default=None,
                     help="overall wall-clock budget in seconds")
     a = ap.parse_args()
@@ -67,7 +69,7 @@ def main() -> None:
     study_dir = Path("outputs") / f"optuna_{a.study_name}"
     study_dir.mkdir(parents=True, exist_ok=True)
 
-    pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=2)
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=50)
     sampler = optuna.samplers.TPESampler(seed=42)
 
     study = optuna.create_study(

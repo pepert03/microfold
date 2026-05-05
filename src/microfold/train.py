@@ -151,6 +151,7 @@ def train(
     out_root: Path = Path("outputs"),
     on_validation: Callable[[int, dict[str, Any]], None] | None = None,
     run_dir_override: Path | None = None,
+    save_checkpoints: bool = True,
 ) -> dict[str, Any]:
     if run_dir_override is not None:
         run_dir = Path(run_dir_override)
@@ -346,17 +347,18 @@ def train(
                         best_row = dict(row)
                         improved = True
 
-            ckpt = {
-                "model": model.state_dict(),
-                "epoch": epoch,
-                "config": config,
-                "metric": row.get("val_rmsd_mean", row["train_rmsd"]),
-            }
-            torch.save(ckpt, run_dir / "last.pt")
-            if improved:
-                torch.save(ckpt, run_dir / "best.pt")
-                torch.save(ckpt, MODELS_DIR / "best.pt")
-                print(f"   saved best.pt @ metric {best_metric:.3f}")
+            if save_checkpoints:
+                ckpt = {
+                    "model": model.state_dict(),
+                    "epoch": epoch,
+                    "config": config,
+                    "metric": row.get("val_rmsd_mean", row["train_rmsd"]),
+                }
+                torch.save(ckpt, run_dir / "last.pt")
+                if improved:
+                    torch.save(ckpt, run_dir / "best.pt")
+                    torch.save(ckpt, MODELS_DIR / "best.pt")
+                    print(f"   saved best.pt @ metric {best_metric:.3f}")
 
             if val_ds is not None and early_stop_patience > 0 and no_improve >= early_stop_patience:
                 stopped_early = True
