@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="484" viewBox="0 0 1024 484" role="img" aria-label="microfold architecture xN block">
+  <defs>
+    <linearGradient id="g-main" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8f9fd"/>
+      <stop offset="100%" stop-color="#f0f2f9"/>
+    </linearGradient>
+    <linearGradient id="g-box" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f7f8fc"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.4" flood-color="#1d2745" flood-opacity="0.16"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f3f6e"/>
+    </marker>
+    <style>
+      .latex { font-family: "Latin Modern Roman", "CMU Serif", "STIX Two Text", "Times New Roman", serif; fill: #121525; }
+      .main { fill: url(#g-main); stroke: #2e3552; stroke-width: 1.6; }
+      .box { fill: url(#g-box); stroke: #2e3552; stroke-width: 1.35; }
+      .flow { stroke: #2f3f6e; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .line { stroke: #2f3f6e; stroke-width: 2; fill: none; }
+      .nx { font-size: 46px; font-style: italic; font-weight: 500; fill: #8b90a3; }
+      .small { font-size: 22px; }
+      .tiny { font-size: 19px; }
+      .label { font-size: 31px; font-style: italic; font-weight: 500; }
+    </style>
+  </defs>
+
+  <!-- main repeated block -->
+  <rect class="main" x="205" y="58" width="670" height="360" rx="54" ry="54" filter="url(#soft-shadow)"/>
+  <!-- Nx centered inside the rectangle -->
+  <text class="latex nx" x="540" y="108" text-anchor="middle">N×</text>
+
+  <!-- input boxes -->
+  <rect class="box" x="22" y="165" width="152" height="76" rx="12" ry="12" filter="url(#soft-shadow)"/>
+  <text class="latex small" x="98" y="188" text-anchor="middle" font-style="italic">
+    s<tspan baseline-shift="sub" font-size="15">i</tspan>
+  </text>
+  <text class="latex tiny" x="98" y="210" text-anchor="middle">ESM-2</text>
+  <text class="latex tiny" x="98" y="230" text-anchor="middle">embeddings</text>
+
+  <rect class="box" x="22" y="292" width="152" height="76" rx="12" ry="12" filter="url(#soft-shadow)"/>
+  <text class="latex small" x="98" y="318" text-anchor="middle" font-style="italic">
+    R<tspan baseline-shift="sub" font-size="15">i</tspan>, t<tspan baseline-shift="sub" font-size="15">i</tspan>
+  </text>
+  <text class="latex small" x="98" y="346" text-anchor="middle">Rigid frames</text>
+
+  <!-- inner boxes -->
+  <rect class="box" x="266" y="165" width="152" height="76" rx="12" ry="12" filter="url(#soft-shadow)"/>
+  <text class="latex small" x="342" y="186" text-anchor="middle" font-style="italic">
+    z<tspan baseline-shift="sub" font-size="15">i,j</tspan>
+  </text>
+  <text class="latex tiny" x="342" y="205" text-anchor="middle">Pair</text>
+  <text class="latex tiny" x="342" y="223" text-anchor="middle">representation</text>
+
+  <rect class="box" x="490" y="133" width="152" height="138" rx="20" ry="20" filter="url(#soft-shadow)"/>
+  <text class="latex small" x="566" y="190" text-anchor="middle">Invariant Point</text>
+  <text class="latex small" x="566" y="214" text-anchor="middle">Attention</text>
+  <text class="latex small" x="566" y="238" text-anchor="middle">(1D, 2D, 3D)</text>
+
+  <rect class="box" x="692" y="165" width="152" height="76" rx="12" ry="12" filter="url(#soft-shadow)"/>
+  <text class="latex tiny" x="768" y="190" text-anchor="middle">
+    New <tspan font-style="italic">s<tspan baseline-shift="sub" font-size="13">i</tspan></tspan>
+  </text>
+  <text class="latex tiny" x="768" y="211" text-anchor="middle">ESM-2</text>
+  <text class="latex tiny" x="768" y="232" text-anchor="middle">embeddings</text>
+
+  <rect class="box" x="699" y="292" width="143" height="76" rx="12" ry="12" filter="url(#soft-shadow)"/>
+  <text class="latex tiny" x="770.5" y="322" text-anchor="middle">Backbone</text>
+  <text class="latex tiny" x="770.5" y="341" text-anchor="middle">Update</text>
+  <text class="latex tiny" x="770.5" y="359" text-anchor="middle">(MLP)</text>
+
+  <!-- top stream -->
+  <path class="flow" d="M 174 203 L 266 203"/>
+  <path class="flow" d="M 418 203 L 490 203"/>
+  <path class="flow" d="M 642 203 L 692 203"/>
+
+  <!-- top branch to IPA -->
+  <path class="line" d="M 236 203 L 236 139 L 452 139 L 452 168"/>
+  <path class="flow" d="M 452 168 L 490 168"/>
+
+  <!-- bottom stream -->
+  <path class="flow" d="M 174 330 L 699 330"/>
+
+  <!-- bottom branch to IPA -->
+  <path class="line" d="M 275 330 L 452 330"/>
+  <path class="line" d="M 452 330 L 452 235"/>
+  <path class="flow" d="M 452 235 L 490 235"/>
+
+  <!-- down from new s_i -->
+  <path class="flow" d="M 768 241 L 768 292"/>
+
+  <!-- outputs -->
+  <path class="flow" d="M 844 203 L 968 203"/>
+  <path class="flow" d="M 842 330 L 968 330"/>
+</svg>

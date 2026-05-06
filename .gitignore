@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# microfold caches
+data_cache/
+outputs/
+models/
