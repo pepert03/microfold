@@ -1,0 +1,308 @@
+\documentclass{article}
+% Recommended compilation:
+% pdflatex memoria.tex  (run twice for references)
+
+\usepackage[preprint]{neurips_2025}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{siunitx}
+\DeclareSIUnit\angstrom{\text{\AA}}
+
+\makeatletter
+\def\@noticestring{}
+\makeatother
+
+
+\title{microfold: Peptide Backbone Prediction with Geometric Deep Learning}
+
+\author{
+Sergio Herreros \\
+IMAT, Universidad Pontificia Comillas \\
+\texttt{sergio.herreros@alu.icai.comillas.edu}
+\And
+José Ridruejo \\
+IMAT, Universidad Pontificia Comillas \\
+\texttt{202111246@alu.comillas.edu}
+}
+
+\newcommand{\docimg}[2][]{%
+  \includegraphics[#1]{#2}%
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Protein structure prediction relies heavily on complex, resource-intensive architectures and the extraction of deep co-evolutionary signals via multiple sequence alignments (MSAs). However, the structural principles governing short, dynamic peptides can often be captured with lighter, single-sequence methods. This research investigates the efficacy of a compact, geometric deep learning architecture designed to recover the 3D backbone coordinates of peptides directly from sequence. By coupling frozen representations from the ESM-2 protein language model with a simplified Invariant Point Attention (IPA) module, we enforce strict spatial awareness and local equivariance without the computational overhead of MSA-processing blocks. Trained from scratch on a curated dataset of antimicrobial peptides, our model successfully recovers global topologies and secondary structures, achieving sub-3 \AA{} validation accuracy. These results demonstrate that explicit geometric biases are sufficient for learning foundational peptide folding principles, while also highlighting the inherent limitations in achieving fine-grained atomistic precision when omitting deep co-evolutionary modules.
+\end{abstract}
+
+\section{Introduction and Problem Statement}
+\label{sec:intro}
+
+Proteins and peptides are inherently geometric objects; their biological functions and interaction dynamics are dictated not merely by their one-dimensional amino acid sequences, but by their precise three-dimensional conformations. Consequently, predicting molecular structure imposes strict physical constraints on machine learning models. A structurally aware architecture must maintain absolute invariance to global translations and rotations---a molecule's internal geometry remains identical regardless of its absolute coordinates in a simulation box---while simultaneously maintaining local equivariance to properly model atomic neighborhoods and spatial constraints.
+
+The advent of AlphaFold 2 (AF2) revolutionized structural biology by elegantly addressing these spatial constraints. It achieved sub-angstrom accuracy through the use of local rigid frames and the Invariant Point Attention (IPA) mechanism, which evaluates attention weights based on physical 3D distances rather than abstract vector spaces. However, AF2 relies heavily on deep co-evolutionary signals extracted via Multiple Sequence Alignments (MSAs) and processed by the computationally massive Evoformer module. For many novel, highly mutable, or short-chain peptides---such as antimicrobial therapeutics---evolutionary depth is often shallow, and the sheer computational cost of running a full-scale AF2 pipeline is vastly disproportionate to the molecule's size.
+
+Recently, Protein Language Models (PLMs) such as ESM-2 have demonstrated that deep neural networks trained on millions of sequences can internalize a rich structural grammar, potentially bypassing the need for explicit MSAs. This project leverages this paradigm shift to construct a scaled-down neural network from scratch, which we call \textit{microfold}. To adapt the principles of AF2 for a resource-constrained environment, we implement deliberate architectural simplifications. Most notably, unlike full-atom models that must predict complex side-chain torsion angles (e.g., $\chi_1, \dots, \chi_4$) and run extensive kinematic checks, \textit{microfold} is strictly a backbone-only predictor. It maps a single amino acid sequence to a series of rigid local frames $(R_i, t_i)$, reconstructing the physical N, C$\alpha$, and C atoms via a mathematical ``frame stamp'' that guarantees perfect intra-residue geometry by design.
+
+To further ensure rapid training and evaluation cycles without requiring massive GPU clusters, we strictly constrain the physical scope of the problem. We utilize a curated dataset of experimentally validated peptides from the DBAASP database, explicitly restricted to short chains of up to 30 residues containing only the 20 canonical amino acids. Furthermore, to keep the computational footprint minimal, we completely discard complex graph-reasoning blocks like the Evoformer and triangle multiplicative updates. Instead, we extract contextualized 1D chemical features directly from frozen ESM-2 embeddings and compute a lightweight, static pairwise representation matrix based on relative sequence distance. This matrix is fed into a simplified IPA stack, forcing the network to learn physical folding rules entirely through spatial geometry and the Frame-Aligned Point Error (FAPE) loss function.
+
+\textbf{Research Question.} Ultimately, this work seeks to answer a foundational question in structural bioinformatics: \textit{Can a minimalist architecture, stripped of deep co-evolutionary processing and side-chain kinematics but retaining strict, explicit geometric biases, predict the backbone topology of short peptides with useful accuracy?}
+
+\begin{figure}[t]
+  \centering
+  \docimg[width=0.98\linewidth]{assets_pdf/architecture.pdf}
+  \caption{Flowchart of the \textit{microfold} architecture.}
+  \label{fig:architecture}
+\end{figure}
+
+\section{Related Work}
+\label{sec:related}
+
+The breakthrough of AlphaFold 2 demonstrated the superiority of using rigid frames and the Invariant Point Attention (IPA) module to bridge sequential information with 3D representations. Subsequent works with protein language models, such as ESM-2, revealed that networks trained on millions of sequences already capture significant structural information, often eliminating the need to generate computationally expensive multiple sequence alignments (MSAs).
+
+Our approach builds upon the theoretical foundation of Geometric Deep Learning. We decided to move beyond standard Graph Neural Networks (GNNs) by utilizing local frames and equivariant transformations. To keep the project viable for our scope and dataset size, we stripped away computationally heavy blocks like the Evoformer and triangle multiplicative updates.
+
+\section{Geometric Foundations}
+\label{sec:background}
+
+\subsection{Rigid Frames and Equivariance}
+
+We assign a local reference system to each $C\alpha$ atom using a rigid frame $(R_i,t_i)$ generated via the Gram-Schmidt process on the vectors pointing to the C and N atoms. Here, $R_i \in SO(3)$ is the rotation matrix and $t_i \in \mathbb{R}^3$ is the translation vector. 
+
+The network does not predict absolute coordinates from scratch; instead, it updates the frames iteratively. The model outputs a local update $(\Delta R_i,\Delta t_i)$ which is applied as follows:
+\begin{equation}
+R_i^{\text{new}} = R_i \Delta R_i, \qquad
+t_i^{\text{new}} = t_i + R_i \Delta t_i.
+\end{equation}
+The predicted translation is expressed in the residue's local frame and is then converted to the global coordinate system by multiplying it by the current rotation matrix.
+
+\subsection{FAPE and Structural Constraints}
+
+We use the Frame-Aligned Point Error (FAPE) as our primary loss function. For each pair (frame $i$, point $j$), FAPE calculates the distance between the predicted and true local coordinates:
+\begin{equation}
+\mathcal{L}_{\text{FAPE}}
+=
+\frac{1}{Z}
+\sum_{i,j}
+\min\!\left(
+\left\|
+(R_i^{p})^\top(x_j^p-t_i^p)-
+(R_i^{t})^\top(x_j^t-t_i^t)
+\right\|,
+10
+\right)\!/10.
+\end{equation}
+This metric clamps the errors at $10\,\text{\AA}$. Its main advantage over a simple Kabsch RMSD is that it is strictly invariant to global rotations and translations, and it heavily penalizes residues that are in the correct spatial location but incorrectly oriented.
+
+While FAPE ensures proper global geometry, it does not prevent atom collisions or broken bonds. Therefore, we incorporated explicit structural violations:
+\begin{enumerate}
+\item \textbf{Peptide Bond Loss}: Penalizes deviations of the $C_i-N_{i+1}$ bond distance from the physical standard of $1.328\,\text{\AA}$ with a tolerance margin of $0.02\,\text{\AA}$.
+\item \textbf{Steric Clash Loss}: Penalizes non-bonded atoms that come closer than $2.0\,\text{\AA}$ to prevent physically impossible atomic overlaps.
+\end{enumerate}
+
+\section{Methodology}
+\label{sec:method}
+
+\subsection{Data and Preprocessing}
+
+Our data pipeline extracts information from DBAASP and the PDB. We filtered for sequences with a maximum length of 30 that contain only the 20 canonical amino acids. 
+
+We downloaded the PDBs from RCSB, parsed the structures using \texttt{biotite}, and extracted the backbone triplets (N, CA, C). Because experimentally resolved peptides frequently have missing terminal residues, we implemented a longest common contiguous substring matching algorithm to dynamically align and mask partial structures. The structures are saved as cached tensors and padded with a binary mask to a sequence length of 30. The final sanitized dataset yields 294 usable peptides.
+
+\subsection{Model Architecture}
+
+The architecture consists of three main blocks:
+
+\textbf{1. Frozen ESM-2 Embedder:} We used \texttt{facebook/esm2\_t12\_35M\_UR50D}. We kept its weights entirely frozen because it already contains rich evolutionary and chemical representations; fine-tuning it with fewer than 300 peptides would cause massive overfitting. It provides a baseline 320-dimensional embedding sequence.
+
+\textbf{2. Pair Representation:} We compute a spatial 2D relationship tensor $z_{ij}$ exactly once before the network loop:
+\begin{equation}
+z_{ij}=\mathrm{LN}\!\left(W_a s_i + W_b s_j + W_r\,\mathrm{onehot}(i-j)\right).
+\end{equation}
+This tensor maps sequence distance and chemical interactions. It is shared as a read-only bias across all layers to save computational resources, radically simplifying the original AlphaFold design while preserving spatial awareness.
+
+\textbf{3. Invariant Point Attention (IPA) Stack:} The core of our Structure Module is a sequence of layers that iteratively refine both the chemical embeddings and the physical 3D frames. Unlike standard Transformers that operate purely in abstract vector spaces, IPA simultaneously evaluates relationships across three distinct modalities:
+\begin{itemize}
+    \item \textbf{1D Abstract Attention:} Standard Multi-Head Attention applied to the 1D ESM-2 embeddings. It computes standard dot-product similarities to determine if the chemical properties of two residues suggest an interaction.
+    \item \textbf{2D Pairwise Bias:} The spatial 2D pair representation $z_{ij}$ is linearly projected and added directly to the attention logits. This biases the attention weights based on the relative sequence distance and pairwise chemistry calculated in the previous step.
+    \item \textbf{3D Geometric Attention:} This is the hallmark of the IPA module. Instead of abstract vectors, the network projects physical 3D Query and Key points---acting as spatial ``antennas'' attached to each amino acid---into their respective local coordinate frames. These antennas are mapped to the global frame, and the attention score is penalized by the squared Euclidean distance between them. If residue $i$'s Query antenna is physically far from residue $j$'s Key antenna, the interaction is heavily penalized, acting as a spatial veto regardless of 1D chemical affinity.
+\end{itemize}
+
+These three scores (1D, 2D, and 3D) are summed together before applying the softmax activation. The resulting unified attention weights are then used to gather information across the network: 1D abstract values, 2D pair values, and 3D physical value points (structural ``cargo'') are collected and concatenated. This massive tensor is projected back down to original dimensions to generate the new, spatially-aware 1D embeddings.
+
+Finally, this updated embedding sequence is passed to a \textbf{Backbone Update} module. A linear layer reads the new embeddings and predicts a 3D twist and push $(\Delta R, \Delta t)$ for each amino acid, moving the rigid frames to their new coordinates in space. A critical implementation detail during this loop is applying a \texttt{detach()} to the rotation matrices between layers; this propagates gradients exclusively through translations, preventing catastrophic numerical instability known as the lever-arm effect.
+
+Ultimately, we generate the final atomic coordinates by projecting an idealized, mathematically rigid backbone triangle onto each updated frame.
+
+\begin{figure}[h]
+  \centering
+  \docimg[width=0.7\linewidth]{assets_pdf/rmsd.pdf}
+  \caption{Training versus validation RMSD across the 1000-epoch run. The validation curve remains highly stable despite the divergence of the training curve, demonstrating the robust regularization provided by explicit geometric invariances.}
+  \label{fig:rmsd_curve}
+\end{figure}
+
+\section{Experiments and Results}
+\label{sec:experiments}
+
+\subsection{Training Configuration}
+
+The training utilizes the AdamW optimizer with gradient norm clipping set to $1.0$. We applied an 85/15 dataset split with seed 42 to guarantee reproducibility. We employed intermediate FAPE loss at every layer of the Structure Module to provide deep supervision and guide the optimizer smoothly through the structural trajectory. 
+
+To prevent the Clash Loss from destroying the early stages of training (where an untrained network might simply scatter all residues to minimize the penalty), we implemented a loss warmup schedule: the network first learns the basic topology using FAPE and the Bond Loss, and only activates the Steric Clash penalty in the latter half of the run to fine-tune the chemistry.
+
+\subsection{Hyperparameter Search}
+
+We executed an Optuna study with median-based pruning. Given the small dataset size, the optimization naturally favored lower-capacity configurations with significant dropout to prevent rote memorization of the training coordinates. 
+
+\begin{table}[h]
+\centering
+\caption{Best hyperparameters found in Trial 74.}
+\label{tab:optuna}
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Objective (\(\texttt{val\_rmsd\_mean}\)) & 2.7563 \AA \\
+\texttt{lr} & 1.606e-4 \\
+\texttt{weight\_decay} & 3.739e-5 \\
+\texttt{dropout} & 0.0201 \\
+\texttt{batch\_size} & 8 \\
+\texttt{n\_layers} & 4 \\
+\texttt{c\_hidden} & 16 \\
+\texttt{n\_heads} & 8 \\
+\texttt{n\_qpoints}, \texttt{n\_vpoints} & 8, 12 \\
+\texttt{w\_bond}, \texttt{w\_clash} & 0.00583, 0.1439 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Final Run}
+
+We launched a final, extended 1000-epoch run using the best hyperparameters to fully assess the model's convergence and generalization behavior. 
+
+\begin{table}[h]
+\centering
+\caption{Results from the final 1000-epoch run.}
+\label{tab:best-run}
+\begin{tabular}{ll}
+\toprule
+Metric & Value \\
+\midrule
+Best saved epoch & 180 \\
+Objective metric & \texttt{val\_rmsd\_mean} \\
+Mean validation RMSD & 2.7471 \AA \\
+Median validation RMSD & 2.6327 \AA \\
+Min / Max validation RMSD & 0.6427 / 6.1072 \AA \\
+Total validation loss & 0.9548 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The mean validation error dropped to $2.7471\,\text{\AA}$. As illustrated in Figure \ref{fig:rmsd_curve}, tracking the training versus validation RMSD provides crucial insight into the network's learning dynamics. We observed a distinct gap indicative of overfitting—the training error continues to decline toward zero while the validation curve plateaus. However, the validation RMSD remains remarkably stable over hundreds of epochs without deteriorating. This resilience to catastrophic overfitting suggests that the model is highly robust. We attribute this stability directly to the heavy inductive biases and strict $SE(3)$ invariances mathematically enforced by the Invariant Point Attention and FAPE loss, which restrict the network's hypothesis space to physically plausible geometries. Overall, the final convergence is highly successful when compared to an untrained random baseline, which typically yields errors between $8$ and $12\,\text{\AA}$. 
+
+
+\subsection{Prediction Visualization}
+
+Our evaluation pipeline generates interactive HTML visuals using \texttt{py3Dmol} to qualitatively diagnose errors. The visual traces confirm that the model correctly learns to form alpha-helices and basic loops, although it occasionally struggles to perfectly compact the global fold. 
+
+\begin{figure*}[h]
+  \centering
+  \captionsetup[subfigure]{justification=centering, singlelinecheck=false}
+  \begin{subfigure}[t]{0.32\textwidth}
+    \centering
+    \docimg[width=\linewidth]{assets_pdf/top_peptide_4476.pdf}
+    \caption{Antimicrobial peptide 1 \\
+    RMSD \(\approx\) 0.47 \AA.}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.32\textwidth}
+    \centering
+    \docimg[width=\linewidth]{assets_pdf/top_peptide_3393.pdf}
+    \caption{LL-37 (17--29) \\
+    RMSD \(\approx\) 0.55 \AA.}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.32\textwidth}
+    \centering
+    \docimg[width=\linewidth]{assets_pdf/top_peptide_3838.pdf}
+    \caption{Tachyplesin-2 \\
+    RMSD \(\approx\) 0.63 \AA.}
+  \end{subfigure}
+  \caption{Qualitative examples with the best validation fit, comparing the structural ground truth (green) and the model's prediction (red).}
+  \label{fig:qualitative}
+\end{figure*}
+
+\section{Discussion and Limitations}
+\label{sec:discussion}
+
+We extract several key engineering and biological lessons from these results:
+
+\textbf{1. Freezing base features is highly effective.} Leveraging the pre-trained ESM-2 marks the difference between success and failure. In our early tests without language embeddings, the model barely outperformed random noise.
+
+\textbf{2. FAPE provides massive optimization stability.} Training directly by optimizing Kabsch RMSD is notoriously difficult. FAPE facilitates convergence because its unaligned, local-frame nature does not punish the network for placing the peptide "far away" in the absolute coordinate space. 
+
+\textbf{3. The consequences of architectural simplification.} The lack of a deep, iterative mechanism to update pair representations (like the Evoformer) means that while the global topology is captured well, the fine-grained geometry (precise non-local angles) fails to resolve perfectly. Scaling this to larger proteins would be the main structural bottleneck. Furthermore, the baseline data in DBAASP inherently introduces noise, as many experimentally mapped peptide structures contain highly flexible, unresolved loops.
+
+\section{Conclusions}
+\label{sec:conclusion}
+
+This project successfully demonstrates the core principles of Geometric Deep Learning applied to the protein folding problem. With a highly compact, custom-built architecture, we managed to recover the backbone topologies of short peptides, reaching a mean validation RMSD of $2.7471\,\text{\AA}$. For future work, introducing deeper reasoning over residue pairs and incorporating side-chain atoms (all-atom representations) would allow for significantly finer geometric refinement.
+
+\section*{Mandatory Declarations}
+
+\textbf{Declaration of Contributions}
+\begin{itemize}
+    \item \textbf{Sergio Herreros}: Executed data ingestion and preprocessing, and programmed the base structure of the repository and architecture, including the Invariant Point Attention (IPA) block and the FAPE loss function.
+    \item \textbf{José Ridruejo}: Programmed the Optuna hyperparameter search, executed model training on the DGX cluster, implemented the auxiliary chemical violation losses ($L_{\text{viol}}$), and developed the interactive visualization suite.
+\end{itemize}
+
+\textbf{Use of AI Tools}
+During the realization of this project, we used Gemini for architectural research and mathematical understanding of the papers, and Claude as a programming assistant.
+
+\begin{thebibliography}{9}
+
+\bibitem[Jumper et~al.(2021)]{jumper2021}
+J.~Jumper, R.~Evans, A.~Pritzel, et al.
+\newblock Highly accurate protein structure prediction with AlphaFold.
+\newblock \emph{Nature}, 596:583--589, 2021.
+
+\bibitem[Lin et~al.(2023)]{lin2023}
+Z.~Lin, T.~Akin, M.~Rao, et al.
+\newblock Evolutionary-scale prediction of atomic-level protein structure with a language model.
+\newblock \emph{Science}, 379(6637):1123--1130, 2023.
+
+\bibitem[Satorras et~al.(2021)]{satorras2021}
+V.~G. Satorras, E.~Hoogeboom, and M.~Welling.
+\newblock E(n) equivariant graph neural networks.
+\newblock In \emph{Proceedings of ICML}, 2021.
+
+\bibitem[Vaswani et~al.(2017)]{vaswani2017}
+A.~Vaswani, N.~Shazeer, N.~Parmar, et al.
+\newblock Attention is all you need.
+\newblock In \emph{Proceedings of NeurIPS}, 2017.
+
+\bibitem[Akiba et~al.(2019)]{optuna2019}
+T.~Akiba, S.~Sano, T.~Yanase, T.~Ohta, and M.~Koyama.
+\newblock Optuna: A next-generation hyperparameter optimization framework.
+\newblock In \emph{Proceedings of KDD}, 2019.
+
+\bibitem[DBAASP(2026)]{dbaasp}
+DBAASP v3 database.
+\newblock \url{https://dbaasp.org/}.
+\newblock Accessed May 2026.
+
+\bibitem[RCSB(2026)]{rcsb}
+RCSB Protein Data Bank.
+\newblock \url{https://www.rcsb.org/}.
+\newblock Accessed May 2026.
+
+\end{thebibliography}
+
+\end{document}
