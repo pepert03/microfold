@@ -1,9 +1,6 @@
 <p align="center">
-  <img src="docs/microfold.svg" alt="microfold" width="100">
+  <img src="docs/logo.svg" alt="microfold" style="width:100%;max-width:420px;height:auto;">
 </p>
-
-<h1 align="center">microfold</h1>
-
 <p align="center"><i>Geometric deep learning for short peptide backbone prediction.</i><br>
 ESM-2 (frozen) → simplified Invariant Point Attention → backbone frames → FAPE.</p>
 
