@@ -1,14 +1,14 @@
-<p align="center">
+<div style="display: flex; align-items: center; justify-content: center; gap: 10px; padding: 15px 0px;">
   <img src="docs/microfold.svg" alt="microfold" width="100">
-</p>
+  <h1 style="margin: 0; font-size: 3.5rem; font-weight: 10000;">microfold</h1>
+</div>
 
-<h1 align="center">microfold</h1>
 
 <p align="center"><i>Geometric deep learning for short peptide backbone prediction.</i><br>
 ESM-2 (frozen) → simplified Invariant Point Attention → backbone frames → FAPE.</p>
 
 <p align="center">
-  <a href="https://pepert03.github.io/microfold//">live demo</a>
+  <b><span style="font-size: 1.5em;">&rarr;</span> <a href="https://pepert03.github.io/microfold//" style="font-size: 1.25em;">live demo</a> <span style="font-size: 1.5em;">&larr;</span></b>
 </p>
 
 ---
@@ -18,6 +18,8 @@ ESM-2 (frozen) → simplified Invariant Point Attention → backbone frames → 
 Given a peptide sequence (≤ 30 residues, canonical AAs), microfold predicts per-residue rigid frames `(R, t)` for the protein backbone. Truth comes from the experimental PDB structure cached from [DBAASP](https://dbaasp.org/), targets are built as N–CA–C frames, and the model is trained with FAPE plus a peptide-bond regulariser (and an optional steric-clash term).
 
 Validation RMSD on the best Optuna trial reaches **2.84 Å mean / 2.59 Å median** over 44 held-out peptides, with the best individual prediction at **0.37 Å**.
+
+> **Note:** See the full project report in [`report/minifold.pdf`](report/minifold.pdf).
 
 ### Sample predictions
 
